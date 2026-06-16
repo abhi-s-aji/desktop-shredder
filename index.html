@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="Desktop Shredder — Physics Simulation Engine">
+<meta name="description" content="Desktop Shredder — Satisfying Physics Engine">
 <title>Desktop Shredder</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -101,6 +101,8 @@ html, body {
   <div class="sv"><span class="sk">FPS</span> <span class="sd" id="s-fps">60</span></div>
   <div class="sv"><span class="sk">Bodies</span> <span class="sd" id="s-bod">0</span></div>
   <div class="sv"><span class="sk">Shards</span> <span class="sd" id="s-shd">0</span></div>
+  <div class="sv"><span class="sk">Impacts</span> <span class="sd" id="s-imp">0</span></div>
+  <div class="sv"><span class="sk">Stress</span> <span class="sd" id="s-str">0</span></div>
   <div class="sv"><span class="sk">Energy</span> <span class="sd" id="s-nrg">0 J</span></div>
 </footer>
 
@@ -112,28 +114,11 @@ const { Engine, Render, Runner, Bodies, Body, World, Events, Mouse, MouseConstra
 
 const W = window.innerWidth;
 const H = window.innerHeight;
+const GLASS_Y = Math.round(H * 0.44);
+const GRID_CELL = 42;
+const MAX_GLASS_HITS = 20;
 
-const engine = Engine.create({ gravity: { x: 0, y: 1.3, scale: 0.001 }, positionIterations: 6, velocityIterations: 5 });
-const world = engine.world;
-const canvas = document.getElementById('sim');
-canvas.width = W; canvas.height = H;
-
-const render = Render.create({
-  canvas, engine,
-  options: { width: W, height: H, background: '#050508', wireframes: false, pixelRatio: window.devicePixelRatio || 1 }
-});
-
-const runner = Runner.create({ delta: 1000 / 60, isFixed: false });
-
-const mouse = Mouse.create(canvas);
-const mc = MouseConstraint.create(engine, { mouse, constraint: { stiffness: 0.18, render: { visible: false } } });
-let mcActive = true;
-World.add(world, mc);
-render.mouse = mouse;
-
-/* --- STATE & SETTINGS --- */
 const STATE = { tool: 'drag', shape: 'box', mode: 'single', mat: 'metal', time: 'norm' };
-
 const MATS = {
   metal:  { density: 0.008, restitution: 0.1,  friction: 0.5, shatter: 14, fill: '#505058', stroke: '#70707a' },
   glass:  { density: 0.002, restitution: 0.15, friction: 0.1, shatter: 3.5, fill: 'rgba(180, 200, 220, 0.18)', stroke: 'rgba(200, 220, 255, 0.3)' },
@@ -141,377 +126,559 @@ const MATS = {
   stone:  { density: 0.006, restitution: 0.12, friction: 0.7, shatter: 8, fill: '#888890', stroke: '#aaaaaf' }
 };
 
-/* --- BOUNDARIES & DESKTOP --- */
-const wallStyle = { isStatic: true, friction: 0.55, restitution: 0.22, label: 'wall', render: { fillStyle: '#0a0a0f', strokeStyle: 'none', lineWidth: 0 } };
-World.add(world, [
-  Bodies.rectangle(W / 2, H + 45, W + 200, 90, wallStyle),
-  Bodies.rectangle(-45, H / 2, 90, H * 4, wallStyle),
-  Bodies.rectangle(W + 45, H / 2, 90, H * 4, wallStyle),
-  Bodies.rectangle(W / 2, -45, W + 200, 90, wallStyle),
-]);
-
-const GLASS_Y = Math.round(H * 0.44);
-const GRID_CELL = 42;
-const MAX_GLASS_HITS = 20;
-
-let glassBody = createGlassBody();
-let glassAlive = true;
-let glassHits = 0;
-const shatteredCells = new Set();
-const cracks = [];
-let shardCount = 0;
-let impactCount = 0;
-
-function createGlassBody() {
-  return Bodies.rectangle(W / 2, GLASS_Y, W + 4, 8, {
-    isStatic: true, friction: 0.04, restitution: 0.42, label: 'glass',
-    render: { fillStyle: 'rgba(190, 210, 248, 0.035)', strokeStyle: 'rgba(0,0,0,0)', lineWidth: 0 }
-  });
-}
-World.add(world, glassBody);
-
-/* --- SPAWNER --- */
-function spawnAt(x, y) {
-  const mat = MATS[STATE.mat];
-  const base = {
-    restitution: mat.restitution, friction: mat.friction, density: mat.density,
-    label: 'obj', matKey: STATE.mat, damage: 0,
-    render: { fillStyle: mat.fill, strokeStyle: mat.stroke, lineWidth: 1 }
-  };
-  let body;
-  if (STATE.shape === 'box') {
-    body = Bodies.rectangle(x, y, 20 + Math.random() * 30, 20 + Math.random() * 30, base);
-  } else if (STATE.shape === 'circle') {
-    body = Bodies.circle(x, y, 12 + Math.random() * 18, base);
-  } else {
-    body = Bodies.polygon(x, y, 4 + Math.floor(Math.random() * 4), 15 + Math.random() * 20, base);
-  }
-  Body.setVelocity(body, { x: (Math.random() - 0.5) * 4, y: 2 + Math.random() * 2 });
-  Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.2);
-  World.add(world, body);
-}
-
 function jit(range) { return (Math.random() - 0.5) * range * 2; }
 
-/* --- TOOLS & INTERACTIONS --- */
-let isMouseDown = false;
-let mousePos = { x: 0, y: 0 };
-let gState = 0; // 0=down, 1=zero, 2=up
+/* ==========================================
+   MODULES
+========================================== */
 
-canvas.addEventListener('mousedown', e => {
-  if (e.button !== 0) return;
-  isMouseDown = true;
-  mousePos = { x: e.clientX, y: e.clientY };
-  handleToolClick();
-});
-canvas.addEventListener('mousemove', e => { mousePos = { x: e.clientX, y: e.clientY }; });
-canvas.addEventListener('mouseup', e => { if (e.button === 0) isMouseDown = false; });
-canvas.addEventListener('contextmenu', e => e.preventDefault());
+const PhysicsEngine = {
+  engine: null, world: null, render: null, runner: null,
+  init() {
+    this.engine = Engine.create({ gravity: { x: 0, y: 1.3, scale: 0.001 }, positionIterations: 6, velocityIterations: 5 });
+    this.world = this.engine.world;
+    this.render = Render.create({
+      canvas: document.getElementById('sim'), engine: this.engine,
+      options: { width: W, height: H, background: '#050508', wireframes: false, pixelRatio: window.devicePixelRatio || 1 }
+    });
+    this.runner = Runner.create({ delta: 1000 / 60, isFixed: false });
+    
+    window.addEventListener('resize', () => {
+      this.render.options.width = window.innerWidth;
+      this.render.options.height = window.innerHeight;
+      this.render.canvas.width = window.innerWidth;
+      this.render.canvas.height = window.innerHeight;
+    });
 
-function handleToolClick() {
-  if (STATE.tool === 'spawn') {
-    if (STATE.mode === 'single') spawnAt(mousePos.x, mousePos.y);
-    else if (STATE.mode === 'burst') {
-      for(let i=0; i<5; i++) spawnAt(mousePos.x + jit(30), mousePos.y + jit(30));
-    }
-  } else if (STATE.tool === 'explode') {
-    applyExplosion(mousePos.x, mousePos.y);
-  } else if (STATE.tool === 'grav') {
-    gState = (gState + 1) % 3;
-    engine.gravity.y = gState === 0 ? 1.3 : (gState === 2 ? -1.3 : 0);
+    Render.run(this.render);
+    Runner.run(this.runner, this.engine);
   }
-}
+};
 
-Events.on(engine, 'beforeUpdate', () => {
-  if (!isMouseDown) return;
-  const dyn = Composite.allBodies(world).filter(b => !b.isStatic);
-  if (STATE.tool === 'pull') {
-    dyn.forEach(b => {
-      let dx = mousePos.x - b.position.x, dy = mousePos.y - b.position.y;
+const SceneManager = {
+  glassBody: null, glassAlive: true, glassHits: 0,
+  shatteredCells: new Set(), cracks: [], shardCount: 0, impactCount: 0,
+  isResetting: false,
+  init() {
+    const wallStyle = { isStatic: true, friction: 0.55, restitution: 0.22, label: 'wall', render: { fillStyle: '#0a0a0f', strokeStyle: 'none', lineWidth: 0 } };
+    World.add(PhysicsEngine.world, [
+      Bodies.rectangle(W / 2, H + 45, W + 200, 90, wallStyle),
+      Bodies.rectangle(-45, H / 2, 90, H * 4, wallStyle),
+      Bodies.rectangle(W + 45, H / 2, 90, H * 4, wallStyle),
+      Bodies.rectangle(W / 2, -45, W + 200, 90, wallStyle),
+    ]);
+    this.createGlass();
+    
+    setInterval(() => {
+      if (STATE.mode === 'rain' && STATE.tool === 'spawn') this.spawnAt(Math.random() * W, -50);
+      
+      const all = Composite.allBodies(PhysicsEngine.world);
+      all.forEach(b => {
+        if (b.isStatic) return;
+        if (b.position.x < -220 || b.position.x > W + 220 || b.position.y > H + 220 || b.position.y < -H * 1.5) {
+          if (b.label === 'shard') this.shardCount = Math.max(0, this.shardCount - 1);
+          World.remove(PhysicsEngine.world, b);
+        }
+      });
+
+      const dyn = Composite.allBodies(PhysicsEngine.world).filter(b => !b.isStatic);
+      if (dyn.length > 380) {
+        dyn.filter(b => b.label === 'shard').slice(0, dyn.length - 380).forEach(b => {
+          this.shardCount = Math.max(0, this.shardCount - 1); World.remove(PhysicsEngine.world, b);
+        });
+      }
+    }, 120);
+  },
+  createGlass() {
+    this.glassBody = Bodies.rectangle(W / 2, GLASS_Y, W + 4, 8, {
+      isStatic: true, friction: 0.04, restitution: 0.42, label: 'glass',
+      render: { fillStyle: 'rgba(190, 210, 248, 0.035)', strokeStyle: 'rgba(0,0,0,0)', lineWidth: 0 }
+    });
+    World.add(PhysicsEngine.world, this.glassBody);
+    this.glassAlive = true;
+  },
+  spawnAt(x, y) {
+    const mat = MATS[STATE.mat];
+    const base = {
+      restitution: mat.restitution, friction: mat.friction, density: mat.density,
+      label: 'obj', matKey: STATE.mat, damage: 0,
+      render: { fillStyle: mat.fill, strokeStyle: mat.stroke, lineWidth: 1 }
+    };
+    let body;
+    if (STATE.shape === 'box') body = Bodies.rectangle(x, y, 20 + Math.random() * 30, 20 + Math.random() * 30, base);
+    else if (STATE.shape === 'circle') body = Bodies.circle(x, y, 12 + Math.random() * 18, base);
+    else body = Bodies.polygon(x, y, 4 + Math.floor(Math.random() * 4), 15 + Math.random() * 20, base);
+    
+    Body.setVelocity(body, { x: (Math.random() - 0.5) * 4, y: 2 + Math.random() * 2 });
+    Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.2);
+    World.add(PhysicsEngine.world, body);
+    SatisfyingEffectsSystem.resetIdle();
+  },
+  reset() {
+    if (this.isResetting) return;
+    this.isResetting = true;
+    PhysicsEngine.engine.gravity.scale = 0;
+    const dyn = Composite.allBodies(PhysicsEngine.world).filter(b => !b.isStatic);
+    dyn.forEach(b => { b.collisionFilter.mask = 0; Body.setAngularVelocity(b, b.angularVelocity * 0.5); });
+
+    let ticks = 0;
+    const shrinkFn = () => {
+      ticks++;
+      dyn.forEach(b => {
+        if (!b.isStatic) {
+          Body.scale(b, 0.9, 0.9);
+          let dx = W/2 - b.position.x, dy = H/2 - b.position.y;
+          Body.applyForce(b, b.position, {x: dx*0.00001*b.mass, y: dy*0.00001*b.mass});
+        }
+      });
+      if (ticks > 40) {
+        Events.off(PhysicsEngine.engine, 'beforeUpdate', shrinkFn);
+        dyn.forEach(b => World.remove(PhysicsEngine.world, b));
+        this.cracks.length = 0; this.shatteredCells.clear(); this.glassHits = 0; this.shardCount = 0; this.impactCount = 0;
+        if (!this.glassAlive) this.createGlass();
+        this.isResetting = false;
+        PhysicsEngine.engine.gravity.scale = 0.001;
+      }
+    };
+    Events.on(PhysicsEngine.engine, 'beforeUpdate', shrinkFn);
+  }
+};
+
+const InteractionController = {
+  mc: null, mcActive: true, isMouseDown: false, mousePos: { x: 0, y: 0 }, gState: 0,
+  init() {
+    const mouse = Mouse.create(PhysicsEngine.render.canvas);
+    this.mc = MouseConstraint.create(PhysicsEngine.engine, { mouse, constraint: { stiffness: 0.18, render: { visible: false } } });
+    World.add(PhysicsEngine.world, this.mc);
+    PhysicsEngine.render.mouse = mouse;
+
+    const canvas = PhysicsEngine.render.canvas;
+    canvas.addEventListener('mousedown', e => {
+      if (e.button !== 0) return;
+      this.isMouseDown = true; this.mousePos = { x: e.clientX, y: e.clientY };
+      this.handleToolClick();
+      SatisfyingEffectsSystem.resetIdle();
+    });
+    canvas.addEventListener('mousemove', e => { 
+      this.mousePos = { x: e.clientX, y: e.clientY }; 
+      SatisfyingEffectsSystem.resetIdle();
+    });
+    canvas.addEventListener('mouseup', e => { if (e.button === 0) this.isMouseDown = false; });
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+  },
+  handleToolClick() {
+    if (STATE.tool === 'spawn') {
+      if (STATE.mode === 'single') SceneManager.spawnAt(this.mousePos.x, this.mousePos.y);
+      else if (STATE.mode === 'burst') {
+        for(let i=0; i<5; i++) SceneManager.spawnAt(this.mousePos.x + jit(30), this.mousePos.y + jit(30));
+      }
+    } else if (STATE.tool === 'explode') {
+      ToolSystem.applyExplosion(this.mousePos.x, this.mousePos.y);
+    } else if (STATE.tool === 'grav') {
+      this.gState = (this.gState + 1) % 3;
+      PhysicsEngine.engine.gravity.y = this.gState === 0 ? 1.3 : (this.gState === 2 ? -1.3 : 0);
+    }
+  },
+  updateToolState(val) {
+    if (val === 'drag' && !this.mcActive) { World.add(PhysicsEngine.world, this.mc); this.mcActive = true; }
+    else if (val !== 'drag' && this.mcActive) { World.remove(PhysicsEngine.world, this.mc); this.mcActive = false; }
+  }
+};
+
+const ToolSystem = {
+  applyExplosion(ex, ey) {
+    Composite.allBodies(PhysicsEngine.world).filter(b => !b.isStatic).forEach(b => {
+      let dx = b.position.x - ex, dy = b.position.y - ey;
+      let dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < 400) {
+        let f = (400 - dist) * 0.0005 * b.mass;
+        Body.applyForce(b, b.position, { x: (dx/dist)*f, y: (dy/dist)*f });
+      }
+    });
+    SatisfyingEffectsSystem.triggerRipple(ex, ey, 20);
+    SatisfyingEffectsSystem.triggerImpactSnap(5);
+  },
+  applyPull(mPos) {
+    Composite.allBodies(PhysicsEngine.world).filter(b => !b.isStatic).forEach(b => {
+      let dx = mPos.x - b.position.x, dy = mPos.y - b.position.y;
       let dist = Math.sqrt(dx*dx + dy*dy);
       if (dist > 10 && dist < 600) {
         let f = 0.00008 * b.mass;
         Body.applyForce(b, b.position, { x: (dx/dist)*f, y: (dy/dist)*f });
       }
     });
-  } else if (STATE.tool === 'wind') {
-    let dx = mousePos.x - W/2, dy = mousePos.y - H/2;
+  },
+  applyWind(mPos) {
+    let dx = mPos.x - W/2, dy = mPos.y - H/2;
     let dist = Math.sqrt(dx*dx + dy*dy) || 1;
     let wx = (dx/dist)*0.0003, wy = (dy/dist)*0.0003;
-    dyn.forEach(b => Body.applyForce(b, b.position, { x: wx * b.mass, y: wy * b.mass }));
-  }
-});
-
-function applyExplosion(ex, ey) {
-  Composite.allBodies(world).filter(b => !b.isStatic).forEach(b => {
-    let dx = b.position.x - ex, dy = b.position.y - ey;
-    let dist = Math.sqrt(dx*dx + dy*dy);
-    if (dist < 400) {
-      let f = (400 - dist) * 0.0005 * b.mass;
-      Body.applyForce(b, b.position, { x: (dx/dist)*f, y: (dy/dist)*f });
-    }
-  });
-}
-
-setInterval(() => {
-  if (STATE.mode === 'rain' && STATE.tool === 'spawn') spawnAt(Math.random() * W, -50);
-}, 120);
-
-/* --- COLLISION & DAMAGE SYSTEM --- */
-const cooldown = new Map();
-
-Events.on(engine, 'collisionStart', (ev) => {
-  for (const pair of ev.pairs) {
-    const { bodyA, bodyB, collision } = pair;
-    if (bodyA.isStatic && bodyB.isStatic) continue;
-
-    const vx = bodyA.velocity.x - bodyB.velocity.x;
-    const vy = bodyA.velocity.y - bodyB.velocity.y;
-    const spd = Math.sqrt(vx*vx + vy*vy);
-
-    if (spd > 2) {
-      applyDamage(bodyA, spd);
-      applyDamage(bodyB, spd);
-    }
-
-    const dynB  = bodyA.isStatic ? bodyB : bodyA;
-    const statB = bodyA.isStatic ? bodyA : bodyB;
-
-    if (statB.label === 'glass' && dynB.label !== 'shard' && spd > 5.0) {
-      const now = performance.now();
-      if (now - (cooldown.get(dynB.id) || 0) < 320) continue;
-      cooldown.set(dynB.id, now);
-
-      let ipx = dynB.position.x, ipy = dynB.position.y;
-      if (collision.supports && collision.supports.length) {
-        ipx = collision.supports.reduce((a, s) => a + s.x, 0) / collision.supports.length;
-        ipy = collision.supports.reduce((a, s) => a + s.y, 0) / collision.supports.length;
-      }
-      const force = Math.min(spd * (dynB.mass || 1) * 80, 30);
-      shatterDesktop(ipx, ipy, { x: dynB.velocity.x, y: dynB.velocity.y }, force);
-    }
-  }
-});
-
-function applyDamage(b, spd) {
-  if (b.isStatic || !b.matKey) return;
-  const mat = MATS[b.matKey];
-  b.damage = (b.damage || 0) + spd;
-
-  if (b.damage > mat.shatter) {
-    if (b.isShattered) return;
-    b.isShattered = true;
-    World.remove(world, b);
-    
-    const numShards = 3 + Math.floor(Math.random() * 3);
-    const size = b.circleRadius ? b.circleRadius * 0.6 : 10;
-    for (let i = 0; i < numShards; i++) {
-      const shard = Bodies.polygon(b.position.x + jit(5), b.position.y + jit(5), 3 + Math.floor(Math.random()*3), size, {
-        restitution: mat.restitution * 0.5, friction: mat.friction, density: mat.density,
-        render: b.render, label: 'shard' // Shards don't break again
-      });
-      Body.setVelocity(shard, { x: b.velocity.x + jit(3), y: b.velocity.y + jit(3) });
-      World.add(world, shard);
-    }
-  } else if (b.damage > mat.shatter * 0.4) {
-    if (!b.cracks) b.cracks = [];
-    if (b.cracks.length < 3) b.cracks.push({ x: jit(10), y: jit(10), ang: Math.random() * Math.PI * 2 });
-  }
-}
-
-function shatterDesktop(ipx, ipy, vel, force) {
-  impactCount++; glassHits++;
-  if (cracks.length >= 65) cracks.shift();
-  cracks.push(buildCrack(ipx, ipy, force * 0.1));
-
-  const radius = 28 + force * 2.6;
-  const gYIdx = Math.round(ipy / GRID_CELL);
-  const minGX = Math.floor((ipx - radius) / GRID_CELL);
-  const maxGX = Math.ceil((ipx + radius) / GRID_CELL);
-
-  for (let gx = minGX; gx <= maxGX; gx++) {
-    const key = `${gx}_${gYIdx}`;
-    if (shatteredCells.has(key) || Math.random() < 0.2) continue;
-    const cellCX = (gx + 0.5) * GRID_CELL;
-    if (Math.abs(cellCX - ipx) > radius) continue;
-    shatteredCells.add(key);
-    const s = buildGridShard(cellCX, ipy, vel, force, ipx);
-    if (s) { World.add(world, s); shardCount++; }
-  }
-
-  const numExtra = 5 + Math.floor(Math.random() * 5);
-  for (let i = 0; i < numExtra; i++) {
-    const ang = (i / numExtra) * Math.PI * 2 + jit(0.7);
-    const dist = 14 + Math.random() * Math.min(force * 1.8, 52);
-    const s = buildRadialShard(ipx + Math.cos(ang)*dist, ipy + Math.sin(ang)*dist, vel, force, ang);
-    if (s) { World.add(world, s); shardCount++; }
-  }
-
-  if (glassHits >= MAX_GLASS_HITS && glassAlive) {
-    World.remove(world, glassBody);
-    glassAlive = false;
-  }
-}
-
-function buildGridShard(cx, cy, vel, speed, impX) {
-  const hw = GRID_CELL * 0.5 * (0.52 + Math.random() * 0.46), hh = GRID_CELL * 0.28 * (0.48 + Math.random() * 0.52), j = GRID_CELL * 0.13;
-  const verts = [{ x: cx-hw+jit(j), y: cy-hh+jit(j) }, { x: cx+hw+jit(j), y: cy-hh+jit(j) }, { x: cx+hw+jit(j), y: cy+hh+jit(j) }, { x: cx-hw+jit(j), y: cy+hh+jit(j) }];
-  const opts = shardOpts();
-  let body;
-  try { body = Bodies.fromVertices(cx, cy, verts, opts); } catch (_) { body = Bodies.rectangle(cx, cy, hw * 1.7, hh * 1.7, opts); }
-  if (!body) return null;
-  const ang = Math.atan2(-0.75, ((cx - impX) || 0.1) > 0 ? 1 : -1);
-  const sp = 1.1 + Math.random() * Math.min(speed * 0.52, 7.5);
-  Body.setVelocity(body, { x: Math.cos(ang) * sp + vel.x * 0.16, y: Math.sin(ang) * sp - 0.6 + vel.y * 0.12 });
-  Body.setAngularVelocity(body, jit(0.26));
-  return body;
-}
-
-function buildRadialShard(cx, cy, vel, speed, angle) {
-  const numV = 4 + Math.floor(Math.random() * 4), size = 6 + Math.random() * (8 + speed * 0.32), step = (Math.PI * 2) / numV, base = Math.random() * Math.PI * 2;
-  const verts = Array.from({ length: numV }, (_, i) => ({
-    x: cx + Math.cos(base + i*step + jit(step*0.5)) * size * (0.44 + Math.random()*0.82),
-    y: cy + Math.sin(base + i*step + jit(step*0.5)) * size * (0.44 + Math.random()*0.82),
-  }));
-  const opts = shardOpts();
-  let body;
-  try { body = Bodies.fromVertices(cx, cy, verts, opts); } catch (_) { body = Bodies.polygon(cx, cy, numV, size * 0.66, opts); }
-  if (!body) return null;
-  const sp = 1.6 + Math.random() * Math.min(speed * 0.44, 9);
-  Body.setVelocity(body, { x: Math.cos(angle) * sp + vel.x * 0.2, y: Math.sin(angle) * sp + vel.y * 0.2 - 1.1 });
-  Body.setAngularVelocity(body, jit(0.29));
-  return body;
-}
-
-function shardOpts() {
-  const g = 142 + Math.floor(Math.random() * 90);
-  return { restitution: 0.30, friction: 0.07, density: 0.0015, label: 'shard', render: { fillStyle: `rgba(${g},${g},${g + 6},0.84)`, strokeStyle: 'rgba(240,242,255,0.18)', lineWidth: 0.5 } };
-}
-
-function buildCrack(cx, cy, speed) {
-  const arms = 4 + Math.floor(Math.random() * 5), maxLen = 26 + Math.min(speed * 3.4, 115), lines = [];
-  for (let a = 0; a < arms; a++) {
-    let curX = cx, curY = cy, curA = (a / arms) * Math.PI * 2 + jit(0.65);
-    const pts = [{ x: cx, y: cy }], segs = 3 + Math.floor(Math.random() * 4), segL = (maxLen / segs) * (0.52 + Math.random() * 0.68);
-    for (let s = 0; s < segs; s++) {
-      curA += jit(0.64); curX += Math.cos(curA) * segL; curY += Math.sin(curA) * segL; pts.push({ x: curX, y: curY });
-      if (Math.random() < 0.44 && s > 0) {
-        const bA = curA + jit(1.05), bLen = segL * (0.3 + Math.random() * 0.52);
-        lines.push([{ x: curX, y: curY }, { x: curX + Math.cos(bA) * bLen, y: curY + Math.sin(bA) * bLen }]);
-      }
-    }
-    lines.push(pts);
-  }
-  return { cx, cy, lines };
-}
-
-/* --- RENDERING FX --- */
-Events.on(render, 'afterRender', () => {
-  const ctx = render.context; ctx.save();
-  
-  if (glassAlive) {
-    const gr = ctx.createLinearGradient(0, GLASS_Y - 8, 0, GLASS_Y + 8);
-    gr.addColorStop(0, 'rgba(185,205,245,0.00)'); gr.addColorStop(0.5, 'rgba(185,205,245,0.11)'); gr.addColorStop(1, 'rgba(185,205,245,0.00)');
-    ctx.fillStyle = gr; ctx.fillRect(0, GLASS_Y - 8, W, 16);
-    ctx.strokeStyle = 'rgba(200,215,248,0.20)'; ctx.lineWidth = 0.85;
-    ctx.beginPath(); ctx.moveTo(0, GLASS_Y); ctx.lineTo(W, GLASS_Y); ctx.stroke();
-  }
-
-  if (cracks.length) {
-    ctx.strokeStyle = 'rgba(172,180,200,0.50)'; ctx.lineWidth = 0.62;
-    for (const crack of cracks) {
-      for (const pts of crack.lines) {
-        if (pts.length < 2) continue;
-        ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.stroke();
-      }
-    }
-  }
-
-  for (let b of Composite.allBodies(world)) {
-    if (b.cracks && b.cracks.length > 0) {
-       ctx.translate(b.position.x, b.position.y); ctx.rotate(b.angle);
-       ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1;
-       b.cracks.forEach(c => {
-          ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(c.x + Math.cos(c.ang)*12, c.y + Math.sin(c.ang)*12); ctx.stroke();
-       });
-       ctx.rotate(-b.angle); ctx.translate(-b.position.x, -b.position.y);
-    }
-  }
-  ctx.restore();
-});
-
-/* --- UI CONTROLS & CLEANUP --- */
-document.querySelectorAll('.t-btn').forEach(btn => {
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const grp = btn.dataset.grp, val = btn.dataset.val;
-    if (grp) {
-      STATE[grp] = val;
-      document.querySelectorAll(`.t-btn[data-grp="${grp}"]`).forEach(b => b.classList.remove('on'));
-      btn.classList.add('on');
-
-      if (grp === 'tool') {
-        if (val === 'drag' && !mcActive) { World.add(world, mc); mcActive = true; }
-        else if (val !== 'drag' && mcActive) { World.remove(world, mc); mcActive = false; }
-      }
-      if (grp === 'time') {
-        if (val === 'pause') engine.timing.timeScale = 0;
-        else if (val === 'slow') engine.timing.timeScale = 0.2;
-        else engine.timing.timeScale = 1;
-      }
-    }
-  });
-});
-
-document.getElementById('rst').addEventListener('click', (e) => {
-  e.stopPropagation();
-  Composite.allBodies(world).filter(b => !b.isStatic).forEach(b => World.remove(world, b));
-  cracks.length = 0; shatteredCells.clear(); glassHits = 0; shardCount = 0; impactCount = 0; cooldown.clear();
-  if (!glassAlive) { World.add(world, glassBody = createGlassBody()); glassAlive = true; }
-});
-
-let lastTime = performance.now(), frames = 0, fps = 60;
-Events.on(render, 'afterRender', () => {
-  frames++; const now = performance.now();
-  if (now - lastTime >= 1000) { fps = Math.round((frames * 1000) / (now - lastTime)); frames = 0; lastTime = now; document.getElementById('s-fps').textContent = fps; }
-});
-
-setInterval(() => {
-  const all = Composite.allBodies(world);
-  for (const b of all) {
-    if (b.isStatic) continue;
-    if (b.position.x < -220 || b.position.x > W + 220 || b.position.y > H + 220 || b.position.y < -H * 1.5) {
-      if (b.label === 'shard') shardCount = Math.max(0, shardCount - 1);
-      World.remove(world, b);
-    }
-  }
-
-  const dyn = Composite.allBodies(world).filter(b => !b.isStatic);
-  if (dyn.length > 380) {
-    dyn.filter(b => b.label === 'shard').slice(0, dyn.length - 380).forEach(b => {
-      shardCount = Math.max(0, shardCount - 1); World.remove(world, b);
+    Composite.allBodies(PhysicsEngine.world).filter(b => !b.isStatic).forEach(b => {
+      Body.applyForce(b, b.position, { x: wx * b.mass, y: wy * b.mass });
     });
   }
+};
 
-  let nrg = 0;
-  dyn.forEach(b => nrg += 0.5 * b.mass * (b.velocity.x*b.velocity.x + b.velocity.y*b.velocity.y));
-  document.getElementById('s-bod').textContent = dyn.length;
-  document.getElementById('s-shd').textContent = shardCount;
-  document.getElementById('s-nrg').textContent = Math.round(nrg) + ' J';
-}, 1000);
+const ShatterSystem = {
+  applyDamage(b, spd) {
+    if (b.isStatic || !b.matKey) return;
+    const mat = MATS[b.matKey];
+    b.damage = (b.damage || 0) + spd;
 
-window.addEventListener('resize', () => {
-  canvas.width = render.options.width = window.innerWidth;
-  canvas.height = render.options.height = window.innerHeight;
-});
+    if (b.damage > mat.shatter) {
+      if (b.isShattered) return;
+      b.isShattered = true;
+      World.remove(PhysicsEngine.world, b);
+      
+      const numShards = 4;
+      const size = b.circleRadius ? b.circleRadius * 0.6 : 10;
+      for (let i = 0; i < numShards; i++) {
+        const angle = (i / numShards) * Math.PI * 2 + b.angle;
+        const shard = Bodies.polygon(b.position.x + Math.cos(angle)*5, b.position.y + Math.sin(angle)*5, 3, size, {
+          restitution: mat.restitution * 0.5, friction: mat.friction, density: mat.density,
+          frictionAir: 0.04, render: b.render, label: 'shard'
+        });
+        Body.setVelocity(shard, { x: b.velocity.x * 0.6 + Math.cos(angle)*3, y: b.velocity.y * 0.6 + Math.sin(angle)*3 });
+        World.add(PhysicsEngine.world, shard);
+        SceneManager.shardCount++;
+      }
+      SatisfyingEffectsSystem.triggerRipple(b.position.x, b.position.y, 6);
+    } else if (b.damage > mat.shatter * 0.4) {
+      if (!b.cracks) b.cracks = [];
+      if (b.cracks.length < 3) b.cracks.push({ x: jit(10), y: jit(10), ang: Math.random() * Math.PI * 2 });
+    }
+  },
 
-Render.run(render);
-Runner.run(runner, engine);
+  shatterDesktop(ipx, ipy, vel, force) {
+    SceneManager.impactCount++; SceneManager.glassHits++;
+    if (SceneManager.cracks.length >= 65) SceneManager.cracks.shift();
+    SceneManager.cracks.push(this.buildCrack(ipx, ipy, force * 0.1));
 
-setTimeout(() => spawnAt(W / 2 + jit(60), 80), 460);
-setTimeout(() => spawnAt(W / 2 + jit(80), 60), 820);
+    const radius = 28 + force * 2.6;
+    const gYIdx = Math.round(ipy / GRID_CELL);
+    const minGX = Math.floor((ipx - radius) / GRID_CELL);
+    const maxGX = Math.ceil((ipx + radius) / GRID_CELL);
+
+    for (let gx = minGX; gx <= maxGX; gx++) {
+      const key = `${gx}_${gYIdx}`;
+      if (SceneManager.shatteredCells.has(key) || Math.random() < 0.2) continue;
+      const cellCX = (gx + 0.5) * GRID_CELL;
+      if (Math.abs(cellCX - ipx) > radius) continue;
+      SceneManager.shatteredCells.add(key);
+      const s = this.buildGridShard(cellCX, ipy, vel, force, ipx);
+      if (s) { World.add(PhysicsEngine.world, s); SceneManager.shardCount++; }
+    }
+
+    const numExtra = 5 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < numExtra; i++) {
+      const ang = (i / numExtra) * Math.PI * 2 + jit(0.7);
+      const dist = 14 + Math.random() * Math.min(force * 1.8, 52);
+      const s = this.buildRadialShard(ipx + Math.cos(ang)*dist, ipy + Math.sin(ang)*dist, vel, force, ang);
+      if (s) { World.add(PhysicsEngine.world, s); SceneManager.shardCount++; }
+    }
+
+    if (SceneManager.glassHits >= MAX_GLASS_HITS && SceneManager.glassAlive) {
+      World.remove(PhysicsEngine.world, SceneManager.glassBody);
+      SceneManager.glassAlive = false;
+    }
+  },
+
+  buildGridShard(cx, cy, vel, speed, impX) {
+    const hw = GRID_CELL * 0.5 * (0.52 + Math.random() * 0.46), hh = GRID_CELL * 0.28 * (0.48 + Math.random() * 0.52), j = GRID_CELL * 0.13;
+    const verts = [{ x: cx-hw+jit(j), y: cy-hh+jit(j) }, { x: cx+hw+jit(j), y: cy-hh+jit(j) }, { x: cx+hw+jit(j), y: cy+hh+jit(j) }, { x: cx-hw+jit(j), y: cy+hh+jit(j) }];
+    const opts = this.shardOpts();
+    let body;
+    try { body = Bodies.fromVertices(cx, cy, verts, opts); } catch (_) { body = Bodies.rectangle(cx, cy, hw * 1.7, hh * 1.7, opts); }
+    if (!body) return null;
+    const ang = Math.atan2(-0.75, ((cx - impX) || 0.1) > 0 ? 1 : -1);
+    const sp = 1.1 + Math.random() * Math.min(speed * 0.52, 7.5);
+    Body.setVelocity(body, { x: Math.cos(ang) * sp + vel.x * 0.16, y: Math.sin(ang) * sp - 0.6 + vel.y * 0.12 });
+    Body.setAngularVelocity(body, jit(0.26));
+    return body;
+  },
+
+  buildRadialShard(cx, cy, vel, speed, angle) {
+    const numV = 4 + Math.floor(Math.random() * 4), size = 6 + Math.random() * (8 + speed * 0.32), step = (Math.PI * 2) / numV, base = Math.random() * Math.PI * 2;
+    const verts = Array.from({ length: numV }, (_, i) => ({
+      x: cx + Math.cos(base + i*step + jit(step*0.5)) * size * (0.44 + Math.random()*0.82),
+      y: cy + Math.sin(base + i*step + jit(step*0.5)) * size * (0.44 + Math.random()*0.82),
+    }));
+    const opts = this.shardOpts();
+    let body;
+    try { body = Bodies.fromVertices(cx, cy, verts, opts); } catch (_) { body = Bodies.polygon(cx, cy, numV, size * 0.66, opts); }
+    if (!body) return null;
+    const sp = 1.6 + Math.random() * Math.min(speed * 0.44, 9);
+    Body.setVelocity(body, { x: Math.cos(angle) * sp + vel.x * 0.2, y: Math.sin(angle) * sp + vel.y * 0.2 - 1.1 });
+    Body.setAngularVelocity(body, jit(0.29));
+    return body;
+  },
+
+  shardOpts() {
+    const g = 142 + Math.floor(Math.random() * 90);
+    return { restitution: 0.30, friction: 0.07, frictionAir: 0.02, density: 0.0015, label: 'shard', render: { fillStyle: `rgba(${g},${g},${g + 6},0.84)`, strokeStyle: 'rgba(240,242,255,0.18)', lineWidth: 0.5 } };
+  },
+
+  buildCrack(cx, cy, speed) {
+    const arms = 4 + Math.floor(Math.random() * 5), maxLen = 26 + Math.min(speed * 3.4, 115), lines = [];
+    for (let a = 0; a < arms; a++) {
+      let curX = cx, curY = cy, curA = (a / arms) * Math.PI * 2 + jit(0.65);
+      const pts = [{ x: cx, y: cy }], segs = 3 + Math.floor(Math.random() * 4), segL = (maxLen / segs) * (0.52 + Math.random() * 0.68);
+      for (let s = 0; s < segs; s++) {
+        curA += jit(0.64); curX += Math.cos(curA) * segL; curY += Math.sin(curA) * segL; pts.push({ x: curX, y: curY });
+        if (Math.random() < 0.44 && s > 0) {
+          const bA = curA + jit(1.05), bLen = segL * (0.3 + Math.random() * 0.52);
+          lines.push([{ x: curX, y: curY }, { x: curX + Math.cos(bA) * bLen, y: curY + Math.sin(bA) * bLen }]);
+        }
+      }
+      lines.push(pts);
+    }
+    return { cx, cy, lines };
+  }
+};
+
+const SatisfyingEffectsSystem = {
+  screenShake: { x: 0, y: 0, intensity: 0 },
+  slowMoTimer: 0,
+  idleTime: 0,
+  lastMousePos: { x: 0, y: 0 },
+  
+  init() {
+    Events.on(PhysicsEngine.engine, 'collisionStart', (ev) => this.handleCollisions(ev));
+    Events.on(PhysicsEngine.engine, 'beforeUpdate', () => this.updateEffects());
+    Events.on(PhysicsEngine.render, 'beforeRender', () => {
+      if (this.screenShake.intensity > 0) PhysicsEngine.render.context.translate(this.screenShake.x, this.screenShake.y);
+    });
+    Events.on(PhysicsEngine.render, 'afterRender', () => {
+      if (this.screenShake.intensity > 0) PhysicsEngine.render.context.translate(-this.screenShake.x, -this.screenShake.y);
+      this.renderEffects(PhysicsEngine.render.context);
+    });
+  },
+
+  resetIdle() { this.idleTime = 0; },
+
+  triggerImpactSnap(intensity) {
+    if (this.slowMoTimer > 0) return; 
+    this.screenShake.intensity = intensity;
+    this.slowMoTimer = 25; 
+    PhysicsEngine.engine.timing.timeScale = 0.2;
+  },
+
+  triggerRipple(x, y, force) {
+    const dyn = Composite.allBodies(PhysicsEngine.world).filter(b => !b.isStatic);
+    dyn.forEach(b => {
+       let dx = b.position.x - x, dy = b.position.y - y;
+       let dist = Math.sqrt(dx*dx + dy*dy);
+       if (dist > 5 && dist < force * 15) {
+         let effect = (1 - dist/(force*15)) * force * 0.0005;
+         Body.applyForce(b, b.position, {x: (dx/dist)*effect*b.mass, y: (dy/dist)*effect*b.mass});
+         ShatterSystem.applyDamage(b, force * 0.1); 
+       }
+    });
+  },
+
+  handleCollisions(ev) {
+    const cooldown = new Map();
+    for (const pair of ev.pairs) {
+      const { bodyA, bodyB, collision } = pair;
+      if (bodyA.isStatic && bodyB.isStatic) continue;
+
+      const vx = bodyA.velocity.x - bodyB.velocity.x;
+      const vy = bodyA.velocity.y - bodyB.velocity.y;
+      const spd = Math.sqrt(vx*vx + vy*vy);
+
+      if (spd > 2) {
+        ShatterSystem.applyDamage(bodyA, spd);
+        ShatterSystem.applyDamage(bodyB, spd);
+        this.resetIdle();
+      }
+
+      if (spd > 8.0) {
+        this.triggerImpactSnap(Math.min(spd, 15));
+        let ipx = bodyA.position.x, ipy = bodyA.position.y;
+        if (collision.supports && collision.supports.length) {
+          ipx = collision.supports[0].x; ipy = collision.supports[0].y;
+        }
+        this.triggerRipple(ipx, ipy, spd);
+      }
+
+      const dynB  = bodyA.isStatic ? bodyB : bodyA;
+      const statB = bodyA.isStatic ? bodyA : bodyB;
+
+      if (statB.label === 'glass' && dynB.label !== 'shard' && spd > 5.0) {
+        const now = performance.now();
+        if (now - (cooldown.get(dynB.id) || 0) < 320) continue;
+        cooldown.set(dynB.id, now);
+
+        let ipx = dynB.position.x, ipy = dynB.position.y;
+        if (collision.supports && collision.supports.length) {
+          ipx = collision.supports.reduce((a, s) => a + s.x, 0) / collision.supports.length;
+          ipy = collision.supports.reduce((a, s) => a + s.y, 0) / collision.supports.length;
+        }
+        const force = Math.min(spd * (dynB.mass || 1) * 80, 30);
+        ShatterSystem.shatterDesktop(ipx, ipy, { x: dynB.velocity.x, y: dynB.velocity.y }, force);
+      }
+    }
+  },
+
+  updateEffects() {
+    if (this.slowMoTimer > 0) {
+      this.slowMoTimer--;
+      if (this.slowMoTimer === 0 && STATE.time !== 'slow') {
+        PhysicsEngine.engine.timing.timeScale = STATE.time === 'norm' ? 1 : 0;
+      }
+    }
+    if (this.screenShake.intensity > 0) {
+      this.screenShake.x = jit(this.screenShake.intensity);
+      this.screenShake.y = jit(this.screenShake.intensity);
+      this.screenShake.intensity *= 0.85;
+      if (this.screenShake.intensity < 0.5) this.screenShake.intensity = 0;
+    }
+
+    this.idleTime++;
+    if (this.idleTime > 180 && !SceneManager.isResetting) {
+      Composite.allBodies(PhysicsEngine.world).filter(b => !b.isStatic).forEach(b => {
+         Body.setVelocity(b, { x: b.velocity.x * 0.98, y: b.velocity.y * 0.98 });
+         Body.setAngularVelocity(b, b.angularVelocity * 0.98);
+      });
+    }
+
+    const mPos = InteractionController.mousePos;
+    if (InteractionController.isMouseDown && !SceneManager.isResetting) {
+      if (STATE.tool === 'pull') ToolSystem.applyPull(mPos);
+      else if (STATE.tool === 'wind') ToolSystem.applyWind(mPos);
+    }
+
+    let dx = mPos.x - this.lastMousePos.x, dy = mPos.y - this.lastMousePos.y;
+    let speed = Math.sqrt(dx*dx + dy*dy);
+    if (speed > 2 && !SceneManager.isResetting) {
+      Composite.allBodies(PhysicsEngine.world).filter(b => !b.isStatic).forEach(b => {
+        let dmx = mPos.x - b.position.x, dmy = mPos.y - b.position.y;
+        let dist = Math.sqrt(dmx*dmx + dmy*dmy);
+        if (dist > 10 && dist < 120) {
+          let f = 0.000008 * b.mass * (120-dist);
+          Body.applyForce(b, b.position, { x: (dmx/dist)*f, y: (dmy/dist)*f });
+        }
+      });
+    }
+    this.lastMousePos = { x: mPos.x, y: mPos.y };
+  },
+
+  renderEffects(ctx) {
+    ctx.save();
+    
+    if (SceneManager.glassAlive) {
+      const gr = ctx.createLinearGradient(0, GLASS_Y - 8, 0, GLASS_Y + 8);
+      gr.addColorStop(0, 'rgba(185,205,245,0.00)'); gr.addColorStop(0.5, 'rgba(185,205,245,0.11)'); gr.addColorStop(1, 'rgba(185,205,245,0.00)');
+      ctx.fillStyle = gr; ctx.fillRect(0, GLASS_Y - 8, W, 16);
+      ctx.strokeStyle = 'rgba(200,215,248,0.20)'; ctx.lineWidth = 0.85;
+      ctx.beginPath(); ctx.moveTo(0, GLASS_Y); ctx.lineTo(W, GLASS_Y); ctx.stroke();
+    }
+
+    if (SceneManager.cracks.length) {
+      ctx.strokeStyle = 'rgba(172,180,200,0.50)'; ctx.lineWidth = 0.62;
+      for (const crack of SceneManager.cracks) {
+        for (const pts of crack.lines) {
+          if (pts.length < 2) continue;
+          ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    Composite.allBodies(PhysicsEngine.world).forEach(b => {
+      if (b.matKey) {
+        const mat = MATS[b.matKey];
+        const stressRatio = (b.damage || 0) / mat.shatter;
+        if (stressRatio > 0.8 && !SceneManager.isResetting) {
+           let pulse = Math.sin(performance.now() * 0.01) * 0.5 + 0.5;
+           ctx.fillStyle = `rgba(255,255,255,${0.08 * pulse})`;
+           ctx.beginPath();
+           ctx.moveTo(b.vertices[0].x, b.vertices[0].y);
+           for(let i=1; i<b.vertices.length; i++) ctx.lineTo(b.vertices[i].x, b.vertices[i].y);
+           ctx.closePath();
+           ctx.fill();
+        }
+      }
+      
+      if (b.cracks && b.cracks.length > 0) {
+         ctx.translate(b.position.x, b.position.y); ctx.rotate(b.angle);
+         ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1;
+         b.cracks.forEach(c => {
+            ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(c.x + Math.cos(c.ang)*12, c.y + Math.sin(c.ang)*12); ctx.stroke();
+         });
+         ctx.rotate(-b.angle); ctx.translate(-b.position.x, -b.position.y);
+      }
+    });
+
+    ctx.restore();
+  }
+};
+
+const UIManager = {
+  lastTime: performance.now(), frames: 0, fps: 60,
+  init() {
+    document.querySelectorAll('.t-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const grp = btn.dataset.grp, val = btn.dataset.val;
+        if (grp) {
+          STATE[grp] = val;
+          document.querySelectorAll(`.t-btn[data-grp="${grp}"]`).forEach(b => b.classList.remove('on'));
+          btn.classList.add('on');
+
+          if (grp === 'tool') InteractionController.updateToolState(val);
+          if (grp === 'time') {
+            if (val === 'pause') PhysicsEngine.engine.timing.timeScale = 0;
+            else if (val === 'slow') PhysicsEngine.engine.timing.timeScale = 0.2;
+            else PhysicsEngine.engine.timing.timeScale = 1;
+            SatisfyingEffectsSystem.slowMoTimer = 0; 
+          }
+        }
+      });
+    });
+
+    document.getElementById('rst').addEventListener('click', (e) => {
+      e.stopPropagation();
+      SceneManager.reset();
+    });
+
+    Events.on(PhysicsEngine.render, 'afterRender', () => {
+      this.frames++; const now = performance.now();
+      if (now - this.lastTime >= 1000) { 
+        this.fps = Math.round((this.frames * 1000) / (now - this.lastTime)); 
+        this.frames = 0; this.lastTime = now; 
+        document.getElementById('s-fps').textContent = this.fps; 
+      }
+    });
+
+    setInterval(() => this.syncStatus(), 1000);
+  },
+  syncStatus() {
+    const dyn = Composite.allBodies(PhysicsEngine.world).filter(b => !b.isStatic);
+    let nrg = 0, stress = 0;
+    dyn.forEach(b => {
+      nrg += 0.5 * b.mass * (b.velocity.x*b.velocity.x + b.velocity.y*b.velocity.y);
+      if (b.damage) stress += b.damage;
+    });
+    document.getElementById('s-bod').textContent = dyn.length;
+    document.getElementById('s-shd').textContent = SceneManager.shardCount;
+    document.getElementById('s-imp').textContent = SceneManager.impactCount;
+    document.getElementById('s-str').textContent = Math.round(stress);
+    document.getElementById('s-nrg').textContent = Math.round(nrg) + ' J';
+  }
+};
+
+/* ==========================================
+   BOOTSTRAP
+========================================== */
+PhysicsEngine.init();
+SceneManager.init();
+InteractionController.init();
+UIManager.init();
+SatisfyingEffectsSystem.init();
+
+setTimeout(() => SceneManager.spawnAt(W / 2 + jit(60), 80), 460);
+setTimeout(() => SceneManager.spawnAt(W / 2 + jit(80), 60), 820);
 </script>
 </body>
 </html>
