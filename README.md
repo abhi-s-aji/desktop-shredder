@@ -1,6 +1,6 @@
 # Desktop Shredder
 
-A browser-based physics sandbox for real-time destruction, fragmentation, and interactive rigid-body simulation using Matter.js and Canvas rendering.
+A browser-based physics simulation system for real-time rigid-body interaction, material-based destruction, and interactive force-driven dynamics using Matter.js and Canvas rendering.
 
 Live Demo: https://desktop-shredder.vercel.app/
 
@@ -8,129 +8,154 @@ Live Demo: https://desktop-shredder.vercel.app/
 
 ## Overview
 
-Desktop Shredder is an interactive physics simulation environment that demonstrates real-time destruction and material-based fragmentation in the browser.
+Desktop Shredder is an interactive physics sandbox that simulates real-time object dynamics, collision-based destruction, and material-dependent behavior in the browser.
 
-The project focuses on:
-- Rigid-body physics behavior using Matter.js
-- Texture-aware fragmentation and visual simulation
-- Canvas-based rendering of dynamic physical interactions
+The system focuses on:
+- Real-time rigid-body physics simulation
+- Material-based object properties and destruction rules
+- User-driven interaction using force and tool-based controls
+- Visual feedback through collision, stress, and impact effects
 
-It includes two distinct implementations within the same repository: a core physics sandbox and an extended image-based shattering system.
+It is built as a performance-focused physics environment powered by Matter.js and HTML5 Canvas.
 
 ---
 
 ## Tech Stack
 
-- Physics Engine: Matter.js v0.19.0 (CDN-based, unmodified)
+- Physics Engine: Matter.js v0.19.0 (CDN, unmodified)
 - Rendering: HTML5 Canvas 2D API
 - Frontend: Vanilla JavaScript (ES6), HTML5, CSS3
-- Styling: Custom CSS with CSS variables and glassmorphism design system
-- Architecture: Modular multi-file structure (inline + external JS separation)
+- UI Styling: Custom CSS (glassmorphism + dark UI system)
+- Architecture: Multi-file structure with embedded core logic
 
 ---
 
 ## System Architecture
 
-The project contains two separate implementations:
+The project consists of the following components:
 
-### Core Sandbox (index.html)
-- Fully self-contained application
-- Inline JavaScript and CSS
-- Physics-driven objects interacting in a simulated environment
-- Focus: rigid-body destruction and interaction systems
+### index.html
+- Main entry point of the application
+- Contains embedded JavaScript for physics engine, scene management, UI system, and interaction logic
+- Initializes Matter.js world and simulation lifecycle
 
-### Extended Shatter System (script.js)
-- External JavaScript-based implementation
-- Supports image upload and texture-based fragmentation
-- Advanced interaction modes (vortex, pulse effects)
-- Enhanced visual simulation of image breaking
+### script.js
+- Secondary implementation file
+- Implements extended physics-based interaction system
+- Includes alternative simulation logic and tool behaviors
 
----
-
-## Rendering Pipeline
-
-- Uses Canvas 2D API exclusively
-- No WebGL or GPU acceleration
-- Custom fragment rendering system:
-  - Each fragment is individually transformed
-  - Canvas state stack used for rotation and translation
-  - Polygon-based clipping for realistic shard rendering
-  - Texture mapping using drawImage per fragment
-
-- Visual effects include:
-  - Screen shake via canvas transform manipulation
-  - Dynamic object rotation and velocity-based motion
-
----
-
-## Physics Implementation
-
-- Built entirely on Matter.js v0.19.0
-- Uses default physics solver without modification
-- Core APIs used:
-  - Engine.create()
-  - Bodies.rectangle / circle / polygon / fromVertices
-  - Body.applyForce / setVelocity / setAngularVelocity
-  - Composite.add / remove
-  - Engine.update
-
-- Physics configuration:
-  - Gravity tuned per scene
-  - Iteration values adjusted for stability (position & velocity iterations)
+### style.css
+- Defines UI layout and visual styling system
+- Implements dark theme with glass-style interface components
 
 ---
 
 ## Core Features
 
-### Physics Sandbox
-- Real-time rigid-body simulation
-- Gravity-driven object interactions
-- Collision-based destruction behavior
+### Physics Simulation
+- Real-time rigid-body dynamics using Matter.js
+- Gravity system with directional control (up, down, off)
+- Collision detection with impact-based responses
 
-### Fragmentation System
-- Procedural object breaking on impact
-- Grid-based and radial shard generation
-- Velocity-driven break intensity
+### Material System
+- Four material types: Metal, Glass, Rubber, Stone
+- Each material has:
+  - Density
+  - Restitution
+  - Friction
+  - Damage threshold
+- Damage accumulation leads to object shattering into fragments
 
-### Interaction System
-- Force-based tools (vortex, pulse, explosion)
-- Mouse-driven physics interaction
-- Real-time object manipulation
+### Interaction Tools
+- Drag: Mouse-based object manipulation using constraints
+- Spawn: Create objects at cursor position
+- Pull: Vortex-style force toward cursor
+- Wind: Directional force field interaction
+- Explode: Radial impulse force application
+- Grav: Gravity direction toggle system
 
-### Extended Image Shattering (script.js)
-- Image upload and fragmentation
-- Texture-mapped physics shards
-- Interactive destruction of images in simulation space
+### Spawn Modes
+- Single object spawn
+- Burst spawn (multiple objects at once)
+- Rain mode (continuous spawning)
+
+### Visual Effects
+- Screen shake on high-impact collisions
+- Slow-motion effect on strong impacts
+- Glass surface crack rendering
+- Object stress visualization before breaking
 
 ---
 
-## Code Structure
+## Rendering System
 
-index.html - Core sandbox (self-contained implementation)  
-script.js - Extended image-based shattering system  
-style.css - UI styling system (glassmorphism + layout design)  
+- Built entirely using Canvas 2D API
+- No WebGL or GPU acceleration
+- Render loop driven by Matter.js runner system
+
+Rendering behavior:
+- Physics bodies rendered using Matter.js renderer
+- Canvas transforms used for motion and rotation
+- Custom overlay effects for cracks, stress, and impact visualization
 
 ---
 
-## Performance Notes
+## Physics Implementation
 
-- Runs entirely on CPU (no GPU/WebGL usage)
-- Performance depends on:
-  - Number of active physics bodies
-  - Fragment density during shattering
-  - Canvas draw call frequency
-- Optimized using:
-  - Controlled physics iteration steps
-  - Canvas state reuse
-  - Selective rendering per frame
+- Matter.js v0.19.0 used without modification
+- Default physics solver and collision system
+
+Core APIs used:
+- Engine.create
+- Engine.update
+- Bodies.rectangle / circle / polygon / fromVertices
+- Body.applyForce / setVelocity / setAngularVelocity
+- Composite.add / remove
+- MouseConstraint system
+- Events system for collision handling
+
+Physics configuration:
+- Adjustable gravity system
+- Tuned iteration values for stability
+- Time scaling support (pause, slow motion, normal)
+
+---
+
+## Performance Behavior
+
+Optimizations implemented:
+- Automatic removal of off-screen objects
+- Shard limit system (max ~380 dynamic bodies)
+- Event throttling for telemetry updates
+- Resize event debouncing
+- Collision cooldown to reduce repeated calculations
+- Idle damping when system is inactive
+
+Limitations:
+- No spatial partitioning system
+- Full O(n) iteration for force-based tools
+- CPU-only simulation (no GPU acceleration)
+
+---
+
+## Features Summary
+
+- Real-time physics sandbox environment
+- Material-based destruction system
+- Multi-tool interaction system (6 tools)
+- Spawn system with multiple modes
+- Collision-driven visual feedback system
+- Glass surface destruction mechanics
+- Performance-aware object lifecycle management
+- Telemetry dashboard (FPS, body count, energy, impacts)
 
 ---
 
 ## Deployment
 
-The project is deployed as a static web application.
+This project is deployed as a static web application.
 
-Hosting:
+Platform:
 - Vercel
 
 ---
@@ -138,6 +163,7 @@ Hosting:
 ## Contact
 
 Developer: Abhi S Aji  
+Website: https://desktop-shredder.vercel.app/  
 Email: abhisaji.dev@gmail.com  
 Alternative Email: abhisajieden@gmail.com  
 LinkedIn: https://www.linkedin.com/in/abhi-s-aji-008445267  
