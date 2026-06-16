@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Desktop Shredder — a professional physics-based destruction sandbox built on Matter.js.">
+<title>Desktop Shredder</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #050508;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+#sim {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  display: block;
+  z-index: 0;
+}
+
+/* ── TOP CONTROL PANEL ── */
+#panel {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px 7px;
+  background: rgba(16, 16, 20, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 11px;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.72),
+    0 1px 0 rgba(255, 255, 255, 0.055) inset;
+  white-space: nowrap;
+}
+
+.brand {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: #3a3a46;
+  padding: 4px 13px 4px 7px;
+  margin-right: 3px;
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.t-btn {
+  background: none;
+  border: none;
+  color: #484858;
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  padding: 5px 14px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 110ms, color 110ms;
+}
+
+.t-btn:hover { background: rgba(255,255,255,0.045); color: #909098; }
+.t-btn.on    { background: rgba(255,255,255,0.085); color: #d0d0d8; }
+
+.vl {
+  width: 1px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.065);
+  margin: 0 3px;
+}
+
+.r-btn {
+  background: none;
+  border: none;
+  color: #363642;
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  padding: 5px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 110ms, color 110ms;
+}
+
+.r-btn:hover { background: rgba(255,255,255,0.035); color: #68687a; }
+
+/* ── BOTTOM STATUS BAR ── */
+#sbar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 27px;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  background: rgba(7, 7, 11, 0.74);
+  border-top: 1px solid rgba(255, 255, 255, 0.052);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.sv {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-right: 18px;
+  margin-right: 18px;
+  border-right: 1px solid rgba(255, 255, 255, 0.048);
+}
+
+.sv:last-child {
+  margin-left: auto;
+  border-right: none;
+  margin-right: 0;
+  padding-right: 0;
+}
+
+.sk {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: #282832;
+  text-transform: uppercase;
+}
+
+.sd {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 10.5px;
+  color: #505060;
+}
+
+/* ── KEYBOARD HINTS ── */
+#hints {
+  position: fixed;
+  bottom: 37px;
+  right: 20px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.hn {
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 9.5px;
+  color: #1e1e26;
+  letter-spacing: 0.03em;
+}
+</style>
+</head>
+<body>
+
+<canvas id="sim"></canvas>
+
+<nav id="panel" role="navigation" aria-label="Simulation controls">
+  <span class="brand">SHREDDER</span>
+  <button class="t-btn on" id="b0" data-t="0">Box</button>
+  <button class="t-btn"    id="b1" data-t="1">Circle</button>
+  <button class="t-btn"    id="b2" data-t="2">Polygon</button>
+  <div class="vl"></div>
+  <button class="r-btn" id="rst">Reset</button>
+</nav>
+
+<footer id="sbar" role="contentinfo" aria-label="Simulation telemetry">
+  <div class="sv"><span class="sk">Mode</span>   <span class="sd" id="s-mode">Box</span></div>
+  <div class="sv"><span class="sk">Bodies</span> <span class="sd" id="s-bod">0</span></div>
+  <div class="sv"><span class="sk">Shards</span> <span class="sd" id="s-shd">0</span></div>
+  <div class="sv"><span class="sk">Impacts</span><span class="sd" id="s-imp">0</span></div>
+  <div class="sv"><span class="sk">Engine</span> <span class="sd">Matter.js 0.19</span></div>
+</footer>
+
+<aside id="hints" aria-label="Keyboard shortcuts">
+  <span class="hn">click — spawn</span>
+  <span class="hn">drag — throw</span>
+  <span class="hn">scroll — cycle type</span>
+  <span class="hn">1 / 2 / 3 — select type</span>
+  <span class="hn">R — reset scene</span>
+</aside>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<script>
+'use strict';
+
+const {
+  Engine, Render, Runner, Bodies, Body, World,
+  Events, Mouse, MouseConstraint, Composite, Vector
+} = Matter;
+
+/* ═══════════════════════════════════════════════════════════════════
+   WORLD DIMENSIONS
+═══════════════════════════════════════════════════════════════════ */
+const W = window.innerWidth;
+const H = window.innerHeight;
+
+/* ═══════════════════════════════════════════════════════════════════
+   ENGINE
+═══════════════════════════════════════════════════════════════════ */
+const engine = Engine.create({
+  gravity: { x: 0, y: 1.3, scale: 0.001 },
+  positionIterations: 6,
+  velocityIterations: 5,
+  constraintIterations: 3,
+});
+const world = engine.world;
+
+/* ═══════════════════════════════════════════════════════════════════
+   RENDERER  (custom canvas, wireframes off)
+═══════════════════════════════════════════════════════════════════ */
+const canvas = document.getElementById('sim');
+canvas.width  = W;
+canvas.height = H;
+
+const render = Render.create({
+  canvas,
+  engine,
+  options: {
+    width:      W,
+    height:     H,
+    background: '#050508',
+    wireframes: false,
+    pixelRatio: 1,
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   RUNNER
+═══════════════════════════════════════════════════════════════════ */
+const runner = Runner.create({ delta: 1000 / 60, isFixed: false });
+
+/* ═══════════════════════════════════════════════════════════════════
+   MOUSE CONSTRAINT  (drag & throw)
+═══════════════════════════════════════════════════════════════════ */
+const mouse = Mouse.create(canvas);
+const mc = MouseConstraint.create(engine, {
+  mouse,
+  constraint: {
+    stiffness:       0.18,
+    angularStiffness: 0.28,
+    render: { visible: false },
+  }
+});
+World.add(world, mc);
+render.mouse = mouse;
+
+/* ═══════════════════════════════════════════════════════════════════
+   STATIC WORLD BOUNDARIES
+═══════════════════════════════════════════════════════════════════ */
+const wallStyle = {
+  isStatic: true,
+  friction: 0.55,
+  restitution: 0.22,
+  label: 'wall',
+  render: { fillStyle: '#0a0a0f', strokeStyle: 'none', lineWidth: 0 }
+};
+
+World.add(world, [
+  Bodies.rectangle(W / 2, H + 45,    W + 200, 90,   wallStyle),  // floor
+  Bodies.rectangle(-45,   H / 2,     90, H * 4,      wallStyle),  // left
+  Bodies.rectangle(W + 45, H / 2,    90, H * 4,      wallStyle),  // right
+  Bodies.rectangle(W / 2, -45,       W + 200, 90,   wallStyle),  // ceiling
+]);
+
+/* ═══════════════════════════════════════════════════════════════════
+   GLASS PLANE  (destructible desktop surface)
+   Simulated as a virtual grid mesh — each cell tracks shatter state.
+═══════════════════════════════════════════════════════════════════ */
+const GLASS_Y        = Math.round(H * 0.44);
+const GRID_CELL      = 42;   // pixels per virtual grid cell
+const MAX_GLASS_HITS = 20;   // hits before glass body is removed
+
+const glassBody = Bodies.rectangle(W / 2, GLASS_Y, W + 4, 8, {
+  isStatic:    true,
+  friction:    0.04,
+  restitution: 0.42,
+  label:       'glass',
+  render: {
+    fillStyle:   'rgba(190, 210, 248, 0.035)',
+    strokeStyle: 'rgba(0,0,0,0)',
+    lineWidth:   0,
+  }
+});
+World.add(world, glassBody);
+
+let glassAlive        = true;
+let glassHits         = 0;
+const shatteredCells  = new Set();  // tracks grid cells already broken
+
+/* ═══════════════════════════════════════════════════════════════════
+   SIMULATION STATE
+═══════════════════════════════════════════════════════════════════ */
+let spawnType    = 0;
+const TYPE_NAMES = ['Box', 'Circle', 'Polygon'];
+const cracks     = [];   // visual crack records
+let shardCount   = 0;
+let impactCount  = 0;
+
+/* ═══════════════════════════════════════════════════════════════════
+   OBJECT SPAWNER
+═══════════════════════════════════════════════════════════════════ */
+function spawnAt(x, y) {
+  const v = 138 + Math.floor(Math.random() * 94);
+  const style = {
+    fillStyle:   `rgb(${v},${v},${v})`,
+    strokeStyle: 'rgba(255,255,255,0.065)',
+    lineWidth:   0.8,
+  };
+  const base = {
+    restitution: 0.44,
+    friction:    0.08,
+    frictionAir: 0.006,
+    density:     0.003,
+    label:       'obj',
+  };
+
+  let body;
+  if (spawnType === 0) {
+    const bw = 18 + Math.random() * 28;
+    const bh = 14 + Math.random() * 22;
+    body = Bodies.rectangle(x, y, bw, bh, { ...base, render: style });
+  } else if (spawnType === 1) {
+    const r = 9 + Math.random() * 17;
+    body = Bodies.circle(x, y, r, {
+      ...base, restitution: 0.58, frictionAir: 0.004, render: style
+    });
+  } else {
+    const sides = 5 + Math.floor(Math.random() * 4);
+    const r     = 12 + Math.random() * 17;
+    body = Bodies.polygon(x, y, sides, r, { ...base, render: style });
+  }
+
+  Body.setVelocity(body, {
+    x: (Math.random() - 0.5) * 2,
+    y: 1.5 + Math.random() * 1.5,
+  });
+  World.add(world, body);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SHATTER SYSTEM
+   Grid-mesh fragmentation + radial debris.
+   On impact: subdivide the affected region into Matter.js bodies.
+═══════════════════════════════════════════════════════════════════ */
+const SPEED_THRESHOLD = 6.2;
+
+function shatterAt(ipx, ipy, vel, speed) {
+  impactCount++;
+  glassHits++;
+
+  // Record visual crack
+  if (cracks.length >= 65) cracks.shift();
+  cracks.push(buildCrack(ipx, ipy, speed));
+
+  /* -- Grid-mesh fragmentation ------------------------------------ */
+  const radius = 28 + speed * 2.6;
+  const gYIdx  = Math.round(ipy / GRID_CELL);
+  const minGX  = Math.floor((ipx - radius) / GRID_CELL);
+  const maxGX  = Math.ceil((ipx + radius) / GRID_CELL);
+
+  for (let gx = minGX; gx <= maxGX; gx++) {
+    const key  = `${gx}_${gYIdx}`;
+    if (shatteredCells.has(key)) continue;
+    if (Math.random() < 0.2) continue;     // ~20% of cells survive intact
+
+    const cellCX = (gx + 0.5) * GRID_CELL;
+    const distX  = cellCX - ipx;
+    if (Math.abs(distX) > radius) continue;
+
+    shatteredCells.add(key);
+    const s = buildGridShard(cellCX, ipy, vel, speed, ipx);
+    if (s) { World.add(world, s); shardCount++; }
+  }
+
+  /* -- Radial debris shards --------------------------------------- */
+  const numExtra = 5 + Math.floor(Math.random() * 5);
+  for (let i = 0; i < numExtra; i++) {
+    const ang  = (i / numExtra) * Math.PI * 2 + (Math.random() - 0.5) * (Math.PI / numExtra) * 1.4;
+    const dist = 14 + Math.random() * Math.min(speed * 1.8, 52);
+    const sx   = ipx + Math.cos(ang) * dist;
+    const sy   = ipy + Math.sin(ang) * dist;
+    const s    = buildRadialShard(sx, sy, vel, speed, ang);
+    if (s) { World.add(world, s); shardCount++; }
+  }
+
+  /* -- Remove glass plane after threshold hits ------------------- */
+  if (glassHits >= MAX_GLASS_HITS && glassAlive) {
+    World.remove(world, glassBody);
+    glassAlive = false;
+  }
+}
+
+/* Grid cell shard: roughly rectangular with jittered corners */
+function buildGridShard(cx, cy, vel, speed, impX) {
+  const hw = GRID_CELL * 0.5  * (0.52 + Math.random() * 0.46);
+  const hh = GRID_CELL * 0.28 * (0.48 + Math.random() * 0.52);
+  const j  = GRID_CELL * 0.13;
+
+  const verts = [
+    { x: cx - hw + jit(j), y: cy - hh + jit(j) },
+    { x: cx + hw + jit(j), y: cy - hh + jit(j) },
+    { x: cx + hw + jit(j), y: cy + hh + jit(j) },
+    { x: cx - hw + jit(j), y: cy + hh + jit(j) },
+  ];
+
+  const opts = shardOpts();
+  let body;
+  try       { body = Bodies.fromVertices(cx, cy, verts, opts); }
+  catch (_) { body = Bodies.rectangle(cx, cy, hw * 1.7, hh * 1.7, opts); }
+  if (!body) return null;
+
+  const dx  = (cx - impX) || 0.1;
+  const ang = Math.atan2(-0.75, dx > 0 ? 1 : -1);
+  const sp  = 1.1 + Math.random() * Math.min(speed * 0.52, 7.5);
+
+  Body.setVelocity(body, {
+    x: Math.cos(ang) * sp + (vel?.x || 0) * 0.16,
+    y: Math.sin(ang) * sp - 0.6 + (vel?.y || 0) * 0.12,
+  });
+  Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.52);
+  return body;
+}
+
+/* Radial debris shard: irregular convex polygon */
+function buildRadialShard(cx, cy, vel, speed, angle) {
+  const numV = 4 + Math.floor(Math.random() * 4);
+  const size = 6 + Math.random() * (8 + speed * 0.32);
+  const step = (Math.PI * 2) / numV;
+  const base = Math.random() * Math.PI * 2;
+
+  const verts = Array.from({ length: numV }, (_, i) => ({
+    x: cx + Math.cos(base + i * step + jit(step * 0.5)) * size * (0.44 + Math.random() * 0.82),
+    y: cy + Math.sin(base + i * step + jit(step * 0.5)) * size * (0.44 + Math.random() * 0.82),
+  }));
+
+  const opts = shardOpts();
+  let body;
+  try       { body = Bodies.fromVertices(cx, cy, verts, opts); }
+  catch (_) { body = Bodies.polygon(cx, cy, numV, size * 0.66, opts); }
+  if (!body) return null;
+
+  const sp = 1.6 + Math.random() * Math.min(speed * 0.44, 9);
+  Body.setVelocity(body, {
+    x: Math.cos(angle) * sp + (vel?.x || 0) * 0.2,
+    y: Math.sin(angle) * sp + (vel?.y || 0) * 0.2 - 1.1,
+  });
+  Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.58);
+  return body;
+}
+
+function shardOpts() {
+  const g = 142 + Math.floor(Math.random() * 90);
+  return {
+    restitution: 0.30,
+    friction:    0.07,
+    frictionAir: 0.013,
+    density:     0.0015,
+    label:       'shard',
+    render: {
+      fillStyle:   `rgba(${g},${g},${g + 6},0.84)`,
+      strokeStyle: 'rgba(240,242,255,0.18)',
+      lineWidth:   0.5,
+    }
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   CRACK PATTERN GENERATOR
+═══════════════════════════════════════════════════════════════════ */
+function buildCrack(cx, cy, speed) {
+  const arms   = 4 + Math.floor(Math.random() * 5);
+  const maxLen = 26 + Math.min(speed * 3.4, 115);
+  const lines  = [];
+
+  for (let a = 0; a < arms; a++) {
+    const baseAng = (a / arms) * Math.PI * 2 + jit(0.65);
+    const pts     = [{ x: cx, y: cy }];
+    const segs    = 3 + Math.floor(Math.random() * 4);
+    const segL    = (maxLen / segs) * (0.52 + Math.random() * 0.68);
+    let curX = cx, curY = cy, curA = baseAng;
+
+    for (let s = 0; s < segs; s++) {
+      curA += jit(0.64);
+      curX += Math.cos(curA) * segL;
+      curY += Math.sin(curA) * segL;
+      pts.push({ x: curX, y: curY });
+
+      if (Math.random() < 0.44 && s > 0) {
+        const bA   = curA + jit(1.05);
+        const bLen = segL * (0.3 + Math.random() * 0.52);
+        lines.push([
+          { x: curX, y: curY },
+          { x: curX + Math.cos(bA) * bLen, y: curY + Math.sin(bA) * bLen }
+        ]);
+      }
+    }
+    lines.push(pts);
+  }
+  return { cx, cy, lines };
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   COLLISION DETECTION
+═══════════════════════════════════════════════════════════════════ */
+const cooldown = new Map();
+
+Events.on(engine, 'collisionStart', (ev) => {
+  for (const pair of ev.pairs) {
+    const { bodyA, bodyB, collision } = pair;
+
+    /* Skip: static–static, shards, non-glass targets */
+    if (bodyA.isStatic && bodyB.isStatic) continue;
+    if (bodyA.label === 'shard' || bodyB.label === 'shard') continue;
+
+    const dynB  = bodyA.isStatic ? bodyB : bodyA;
+    const statB = bodyA.isStatic ? bodyA : bodyB;
+
+    if (dynB.label !== 'obj')    continue;
+    if (statB.label !== 'glass') continue;
+
+    /* Relative speed */
+    const vx  = dynB.velocity.x;
+    const vy  = dynB.velocity.y;
+    const spd = Math.sqrt(vx * vx + vy * vy);
+    if (spd < SPEED_THRESHOLD) continue;
+
+    /* Per-body cooldown to avoid multi-frame repeat */
+    const now = performance.now();
+    if (now - (cooldown.get(dynB.id) || 0) < 320) continue;
+    cooldown.set(dynB.id, now);
+
+    /* Impact coordinates (average of contact supports, fallback to body position) */
+    let ipx = dynB.position.x;
+    let ipy = dynB.position.y;
+    if (collision.supports && collision.supports.length) {
+      let sx = 0, sy = 0;
+      for (const s of collision.supports) { sx += s.x; sy += s.y; }
+      ipx = sx / collision.supports.length;
+      ipy = sy / collision.supports.length;
+    }
+
+    const force = Math.min(spd * (dynB.mass || 1) * 80, 30);
+    shatterAt(ipx, ipy, { x: vx, y: vy }, force);
+
+    /* Remove the impacting body — it fractures into the shards */
+    World.remove(world, dynB);
+    cooldown.delete(dynB.id);
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   CUSTOM RENDERING  (glass plane edge + crack patterns)
+   Drawn in afterRender so bodies composite beneath the overlay.
+═══════════════════════════════════════════════════════════════════ */
+Events.on(render, 'afterRender', () => {
+  const ctx = render.context;
+
+  /* Glass plane edge highlight */
+  if (glassAlive) {
+    ctx.save();
+
+    /* Soft gradient band centred on the glass surface */
+    const gr = ctx.createLinearGradient(0, GLASS_Y - 8, 0, GLASS_Y + 8);
+    gr.addColorStop(0,   'rgba(185,205,245,0.00)');
+    gr.addColorStop(0.5, 'rgba(185,205,245,0.11)');
+    gr.addColorStop(1,   'rgba(185,205,245,0.00)');
+    ctx.fillStyle = gr;
+    ctx.fillRect(0, GLASS_Y - 8, W, 16);
+
+    /* Sharp edge line */
+    ctx.strokeStyle = 'rgba(200,215,248,0.20)';
+    ctx.lineWidth   = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(0, GLASS_Y);
+    ctx.lineTo(W, GLASS_Y);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  /* Crack patterns */
+  if (cracks.length) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(172,180,200,0.50)';
+    ctx.lineWidth   = 0.62;
+    for (const crack of cracks) {
+      for (const pts of crack.lines) {
+        if (pts.length < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(pts[0].x, pts[0].y);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   SPAWN ON CLICK  (click = spawn, drag = throw)
+═══════════════════════════════════════════════════════════════════ */
+let mdownX = 0, mdownY = 0, wasDrag = false;
+
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button !== 0) return;
+  mdownX  = e.clientX;
+  mdownY  = e.clientY;
+  wasDrag = false;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (!(e.buttons & 1)) return;
+  const dx = e.clientX - mdownX;
+  const dy = e.clientY - mdownY;
+  if (dx * dx + dy * dy > 40) wasDrag = true;
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  if (e.button !== 0) return;
+  if (!wasDrag && !mc.body) spawnAt(e.clientX, e.clientY);
+  wasDrag = false;
+});
+
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+/* ═══════════════════════════════════════════════════════════════════
+   SCROLL — cycle spawn type
+═══════════════════════════════════════════════════════════════════ */
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  spawnType = (spawnType + (e.deltaY > 0 ? 1 : -1) + 3) % 3;
+  syncButtons();
+  syncStatus();
+}, { passive: false });
+
+/* ═══════════════════════════════════════════════════════════════════
+   PANEL BUTTONS
+═══════════════════════════════════════════════════════════════════ */
+document.querySelectorAll('.t-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    spawnType = +btn.dataset.t;
+    syncButtons();
+    syncStatus();
+  });
+});
+
+document.getElementById('rst').addEventListener('click', (e) => {
+  e.stopPropagation();
+  resetScene();
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   KEYBOARD SHORTCUTS
+═══════════════════════════════════════════════════════════════════ */
+document.addEventListener('keydown', (e) => {
+  if (e.key === '1') { spawnType = 0; syncButtons(); syncStatus(); }
+  if (e.key === '2') { spawnType = 1; syncButtons(); syncStatus(); }
+  if (e.key === '3') { spawnType = 2; syncButtons(); syncStatus(); }
+  if (e.key === 'r' || e.key === 'R') resetScene();
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   RESET
+═══════════════════════════════════════════════════════════════════ */
+function resetScene() {
+  Composite.allBodies(world)
+    .filter(b => !b.isStatic)
+    .forEach(b => World.remove(world, b));
+
+  cracks.length = 0;
+  shatteredCells.clear();
+  glassHits   = 0;
+  shardCount  = 0;
+  impactCount = 0;
+  cooldown.clear();
+
+  if (!glassAlive) {
+    World.add(world, glassBody);
+    glassAlive = true;
+  }
+  syncStatus();
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   PERFORMANCE CLEANUP
+   Remove bodies that have left the visible area.
+   Hard-cap body count to maintain stable 60 fps at scale.
+═══════════════════════════════════════════════════════════════════ */
+const MARGIN  = 220;
+const CAP     = 380;
+
+setInterval(() => {
+  const all = Composite.allBodies(world);
+
+  for (const b of all) {
+    if (b.isStatic) continue;
+    const { x, y } = b.position;
+    if (x < -MARGIN || x > W + MARGIN || y > H + MARGIN || y < -H * 1.5) {
+      if (b.label === 'shard') shardCount = Math.max(0, shardCount - 1);
+      cooldown.delete(b.id);
+      World.remove(world, b);
+    }
+  }
+
+  const dynamic = Composite.allBodies(world).filter(b => !b.isStatic);
+  if (dynamic.length > CAP) {
+    dynamic
+      .filter(b => b.label === 'shard')
+      .slice(0, dynamic.length - CAP)
+      .forEach(b => {
+        shardCount = Math.max(0, shardCount - 1);
+        World.remove(world, b);
+      });
+  }
+
+  syncStatus();
+}, 1800);
+
+/* ═══════════════════════════════════════════════════════════════════
+   UI HELPERS
+═══════════════════════════════════════════════════════════════════ */
+function syncStatus() {
+  const dyn = Composite.allBodies(world).filter(b => !b.isStatic).length;
+  document.getElementById('s-mode').textContent = TYPE_NAMES[spawnType];
+  document.getElementById('s-bod').textContent  = dyn;
+  document.getElementById('s-shd').textContent  = shardCount;
+  document.getElementById('s-imp').textContent  = impactCount;
+}
+
+function syncButtons() {
+  document.querySelectorAll('.t-btn').forEach(b => {
+    b.classList.toggle('on', +b.dataset.t === spawnType);
+  });
+}
+
+function jit(range) { return (Math.random() - 0.5) * range * 2; }
+
+/* ═══════════════════════════════════════════════════════════════════
+   WINDOW RESIZE
+═══════════════════════════════════════════════════════════════════ */
+window.addEventListener('resize', () => {
+  const nW = window.innerWidth;
+  const nH = window.innerHeight;
+  render.options.width  = nW;
+  render.options.height = nH;
+  canvas.width  = nW;
+  canvas.height = nH;
+  Render.setPixelRatio(render, 1);
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   BOOTSTRAP
+═══════════════════════════════════════════════════════════════════ */
+Render.run(render);
+Runner.run(runner, engine);
+syncStatus();
+
+/* Initial demo drop so the user immediately sees physics in action */
+setTimeout(() => {
+  spawnAt(W / 2 + (Math.random() - 0.5) * 120, 80);
+}, 460);
+setTimeout(() => {
+  spawnAt(W / 2 + (Math.random() - 0.5) * 160, 60);
+}, 820);
+</script>
+</body>
+</html>
